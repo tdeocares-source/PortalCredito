@@ -1,0 +1,13 @@
+# Next 16 en Netlify: el plugin transforma el output de `.next/` en funciones
+# serverless. Sin él, Netlify sirve solo assets estáticos y todo el routing
+# del App Router devuelve 404.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
