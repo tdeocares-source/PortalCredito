@@ -61,6 +61,7 @@ export default async function ResultadoPage({
 
   return (
     <ResultadoView
+      informeId={informe.id}
       nombre={solicitud.nombre ?? ""}
       contacto={contacto}
       ufAprobadas={informe.monto_uf_aprobado ?? 0}

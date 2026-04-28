@@ -1,12 +1,15 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, Sparkles, TrendingUp, Wallet } from "lucide-react";
+import posthog from "posthog-js";
 import { Button } from "@/components/ui/button";
 import { formatCLP, formatUF } from "@/lib/financial-calc";
 import { clearWizardStorage } from "@/components/wizard/use-wizard";
 
 export type ResultadoViewProps = {
+  informeId: string;
   nombre: string;
   contacto: string;
   ufAprobadas: number;
@@ -16,6 +19,7 @@ export type ResultadoViewProps = {
 };
 
 export function ResultadoView({
+  informeId,
   nombre,
   contacto,
   ufAprobadas,
@@ -25,7 +29,12 @@ export function ResultadoView({
 }: ResultadoViewProps) {
   const router = useRouter();
 
+  useEffect(() => {
+    posthog.capture("informe_viewed", { informe_id: informeId });
+  }, [informeId]);
+
   const handleReset = () => {
+    posthog.capture("informe_reset_clicked");
     clearWizardStorage();
     router.push("/");
   };

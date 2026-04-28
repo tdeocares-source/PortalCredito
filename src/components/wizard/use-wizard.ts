@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useForm, type UseFormReturn } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import posthog from "posthog-js";
 
 import {
   EMPTY_WIZARD,
@@ -79,6 +80,9 @@ export function useWizard(): UseWizardReturn {
       form.reset({ ...EMPTY_WIZARD, ...stored.values } as WizardData);
       const safeIndex = Math.max(0, Math.min(stored.stepIndex, TOTAL_STEPS - 1));
       setStepIndex(safeIndex);
+      posthog.capture("wizard_resumed", { resumed_at_step: safeIndex });
+    } else {
+      posthog.capture("wizard_started");
     }
     setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,7 +107,17 @@ export function useWizard(): UseWizardReturn {
   const next = async (extraFields: (keyof WizardData)[] = []) => {
     const fields = [...STEP_FIELDS[stepKey], ...extraFields];
     const ok = await form.trigger(fields, { shouldFocus: true });
-    if (!ok) return false;
+    if (!ok) {
+      posthog.capture("wizard_step_validation_failed", {
+        step_index: stepIndex,
+        step_key: stepKey,
+      });
+      return false;
+    }
+    posthog.capture("wizard_step_completed", {
+      step_index: stepIndex,
+      step_key: stepKey,
+    });
     if (stepIndex < TOTAL_STEPS - 1) {
       setStepIndex((i) => i + 1);
     }

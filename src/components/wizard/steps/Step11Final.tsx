@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useFormContext } from "react-hook-form";
 import { useRouter } from "next/navigation";
+import posthog from "posthog-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,9 +39,11 @@ export function Step11Final({ wizard }: StepProps) {
 
       const result = await submitSolicitud(parsed.data);
       if (!result.ok) {
+        posthog.capture("wizard_submit_failed", { error: result.error });
         setError(result.error);
         return;
       }
+      posthog.capture("wizard_submitted", { informe_id: result.informeId });
       clearWizardStorage();
       router.push(`/wizard/sent?correo=${encodeURIComponent(result.correo)}`);
     });
