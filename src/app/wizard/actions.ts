@@ -121,7 +121,6 @@ export async function submitSolicitud(
   // hashed_token construimos una URL hacia /auth/confirm que lo verifica
   // server-side via supabase.auth.verifyOtp.
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-  const resultadoUrl = `${siteUrl}/wizard/resultado?id=${informe.id}`;
 
   let magicLinkUrl: string | null = null;
   try {
@@ -142,18 +141,12 @@ export async function submitSolicitud(
     console.error("submitSolicitud: generateLink exception", err);
   }
 
-  // 5. Email best-effort. Si falló generateLink, mandamos igual (sin botón
-  // de magic link, solo el resumen). El cliente puede ir a /login con su
-  // correo para recibir un nuevo link.
+  // 5. Email best-effort. Liviano: solo anuncia el informe + magic link.
+  // Los números viven en el portal para forzar el click (engagement).
   try {
     await enviarEmailInforme({
       to: w.correo,
       nombre: w.nombre,
-      ufAprobadas: resumen.ufAprobadas,
-      cuotaMaxima: resumen.cuotaMaxima,
-      liquidoEfectivo: resumen.liquidoEfectivo,
-      tips,
-      resultadoUrl,
       magicLinkUrl,
     });
   } catch (err) {
