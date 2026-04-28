@@ -115,8 +115,11 @@ export async function submitSolicitud(
     .update({ status: "procesada" } as never)
     .eq("id", solicitud.id);
 
-  // 4. Generar magic link via Admin API (no manda email; lo mandamos
-  // nosotros con el contenido custom).
+  // 4. Generar magic link via Admin API. Usamos `hashed_token` (no
+  // `action_link`) porque action_link devuelve el token en el hash de la
+  // URL (#access_token=...) que solo es visible en el browser. Con
+  // hashed_token construimos una URL hacia /auth/confirm que lo verifica
+  // server-side via supabase.auth.verifyOtp.
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
   const resultadoUrl = `${siteUrl}/wizard/resultado?id=${informe.id}`;
 
@@ -125,14 +128,15 @@ export async function submitSolicitud(
     const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
       type: "magiclink",
       email: w.correo,
-      options: {
-        redirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent(`/wizard/resultado?id=${informe.id}`)}`,
-      },
     });
     if (linkErr) {
       console.error("submitSolicitud: generateLink falló", linkErr);
     } else {
-      magicLinkUrl = linkData.properties?.action_link ?? null;
+      const hashedToken = linkData.properties?.hashed_token;
+      if (hashedToken) {
+        const next = encodeURIComponent(`/wizard/resultado?id=${informe.id}`);
+        magicLinkUrl = `${siteUrl}/auth/confirm?token_hash=${hashedToken}&type=magiclink&next=${next}`;
+      }
     }
   } catch (err) {
     console.error("submitSolicitud: generateLink exception", err);
