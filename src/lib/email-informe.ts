@@ -1,10 +1,18 @@
 /**
  * Envía el resumen del informe al cliente vía Resend.
  *
- * Restricciones mientras el dominio Resend no esté verificado:
- * - El FROM debe usar un dominio verificado o `onboarding@resend.dev`.
- * - El TO solo puede ser el email de la cuenta Resend (modo sandbox).
- * Cuando se verifique el dominio, ambas restricciones desaparecen.
+ * El email contiene:
+ * - Resumen financiero (UF aprobado + cuota + tips)
+ * - Botón "Ver mi informe completo" con un magic link de Supabase: al
+ *   clickearlo, el cliente queda autenticado y aterriza en su informe.
+ *
+ * Si magicLinkUrl es null (generateLink falló), el email igual se manda
+ * con el resumen, pero sin botón. El cliente puede ir a /login con su
+ * correo para recibir un magic link manualmente.
+ *
+ * Restricciones del modo sandbox de Resend (mientras el dominio no esté
+ * verificado): from debe ser onboarding@resend.dev y to solo puede ser el
+ * email del owner de la cuenta Resend.
  */
 
 import { Resend } from "resend";
@@ -20,6 +28,7 @@ export type EnviarEmailInformeInput = {
   liquidoEfectivo: number;
   tips: Tip[];
   resultadoUrl: string;
+  magicLinkUrl: string | null;
 };
 
 export async function enviarEmailInforme(input: EnviarEmailInformeInput) {
@@ -33,7 +42,7 @@ export async function enviarEmailInforme(input: EnviarEmailInformeInput) {
   const { data, error } = await resend.emails.send({
     from,
     to: input.to,
-    subject: `${input.nombre}, tu resumen de Portal Crédito`,
+    subject: `${input.nombre}, tu informe de Portal Crédito está listo`,
     html: renderHtml(input),
   });
 
@@ -44,7 +53,6 @@ export async function enviarEmailInforme(input: EnviarEmailInformeInput) {
 }
 
 function renderHtml(input: EnviarEmailInformeInput): string {
-  // Inline styles porque clientes de email son inconsistentes con CSS externo.
   const tipsHtml = input.tips
     .map(
       (t) => `
@@ -55,11 +63,31 @@ function renderHtml(input: EnviarEmailInformeInput): string {
     )
     .join("");
 
+  const ctaHtml = input.magicLinkUrl
+    ? `
+      <div style="text-align:center;margin:32px 0;">
+        <a href="${escapeHtml(input.magicLinkUrl)}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:600;">
+          Ver mi informe completo
+        </a>
+        <div style="font-size:12px;color:#94a3b8;margin-top:12px;">
+          Este link expira en 1 hora. Si pasa el tiempo, podés pedir uno nuevo en
+          <a href="${escapeHtml(input.resultadoUrl.replace(/\/wizard\/resultado.*$/, "/login"))}" style="color:#475569;">${escapeHtml(input.resultadoUrl.replace(/\/wizard\/resultado.*$/, "/login"))}</a>
+        </div>
+      </div>`
+    : `
+      <div style="text-align:center;margin:32px 0;">
+        <p style="color:#475569;font-size:14px;">
+          Para acceder a tu informe completo, andá a
+          <a href="${escapeHtml(input.resultadoUrl.replace(/\/wizard\/resultado.*$/, "/login"))}" style="color:#0f172a;">${escapeHtml(input.resultadoUrl.replace(/\/wizard\/resultado.*$/, "/login"))}</a>
+          y pedí un link con tu correo.
+        </p>
+      </div>`;
+
   return `<!doctype html>
 <html lang="es">
 <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#fff;color:#0f172a;margin:0;padding:24px;">
   <div style="max-width:560px;margin:0 auto;">
-    <h1 style="font-size:24px;margin:0 0 8px 0;line-height:1.3;">Hola ${escapeHtml(input.nombre)}, este es tu resumen</h1>
+    <h1 style="font-size:24px;margin:0 0 8px 0;line-height:1.3;">Hola ${escapeHtml(input.nombre)}, tu informe está listo</h1>
     <p style="color:#475569;font-size:14px;margin:0 0 24px 0;">
       Estimación referencial. El monto final lo entrega cada banco según su evaluación crediticia.
     </p>
@@ -84,11 +112,8 @@ function renderHtml(input: EnviarEmailInformeInput): string {
     <h2 style="font-size:18px;margin:0 0 12px 0;">Cómo mejorar tu perfil crediticio</h2>
     ${tipsHtml}
 
-    <p style="margin-top:24px;font-size:14px;color:#475569;">
-      Podés volver a ver tu resumen acá:
-      <br/>
-      <a href="${escapeHtml(input.resultadoUrl)}" style="color:#0f172a;">${escapeHtml(input.resultadoUrl)}</a>
-    </p>
+    ${ctaHtml}
+
     <p style="margin-top:32px;font-size:12px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:12px;">
       Portal Crédito · Esta estimación es referencial y no constituye una pre-aprobación bancaria.
     </p>

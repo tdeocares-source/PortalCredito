@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getCurrentUser } from "@/lib/auth";
 import { callCrediBid } from "@/lib/credibid";
 import { calcularResumen } from "@/lib/financial-calc";
 import { generarConsejos } from "@/lib/consejos";
@@ -11,25 +10,23 @@ import { enviarEmailInforme } from "@/lib/email-informe";
 import type { Json } from "@/lib/database.types";
 
 export type SubmitSolicitudResult =
-  | { ok: true; informeId: string }
+  | { ok: true; informeId: string; correo: string }
   | { ok: false; error: string };
 
 /**
- * Persiste la solicitud en BD, llama al mock CrediBid, calcula el resumen
- * local + tips, inserta el informe y dispara el email al cliente. Devuelve
- * el id del informe para que el cliente navegue a /wizard/resultado?id=...
+ * Persiste la solicitud + informe en BD (sin user_id), genera un magic link
+ * de Supabase para el correo del cliente y manda un email con resumen + link.
  *
- * El email es best-effort: si Resend falla, se loggea pero el flow no rompe
- * (el informe ya quedó persistido y el cliente puede verlo igualmente).
+ * El cliente queda como "huérfano" (user_id = null) hasta que clickee el
+ * magic link, momento en que /auth/callback hace el claim de sus solicitudes.
+ *
+ * El email es best-effort: si falla, se loggea pero el flow no rompe (la
+ * solicitud queda persistida; el cliente puede pedir un nuevo magic link
+ * desde /login con el mismo correo).
  */
 export async function submitSolicitud(
   data: WizardData,
 ): Promise<SubmitSolicitudResult> {
-  const user = await getCurrentUser();
-  if (!user) {
-    return { ok: false, error: "Tu sesión expiró. Volvé a iniciar." };
-  }
-
   const parsed = wizardSchema.safeParse(data);
   if (!parsed.success) {
     return { ok: false, error: "Los datos del formulario son inválidos." };
@@ -37,10 +34,11 @@ export async function submitSolicitud(
   const w = parsed.data;
   const admin = getSupabaseAdmin();
 
-  // 1. Persistir solicitud (estado enviada).
+  // 1. Persistir solicitud huérfana.
   const solicitudInsert = {
-    user_id: user.id,
+    user_id: null,
     status: "enviada",
+    correo_contacto: w.correo,
     nombre: w.nombre,
     apellido: w.apellido,
     proposito: w.proposito,
@@ -68,7 +66,7 @@ export async function submitSolicitud(
     return { ok: false, error: "No pudimos guardar tu solicitud. Intentá de nuevo." };
   }
 
-  // 2. Llamar mock CrediBid + cálculo local + tips.
+  // 2. Mock CrediBid + cálculo local + tips.
   const credi = await callCrediBid({
     rut: w.rut,
     liquidoMensual: w.liquidoMensual,
@@ -90,9 +88,7 @@ export async function submitSolicitud(
     mesGastosFuertes: w.mesGastosFuertes,
   });
 
-  // 3. Persistir informe. Tips se serializan como JSON dentro de text[]
-  // (compromiso para no cambiar el schema; cada elemento es un JSON.stringify
-  // del Tip). Al leer, se hace JSON.parse de cada entrada.
+  // 3. Persistir informe.
   const informeInsert = {
     solicitud_id: solicitud.id,
     credibid_response: credi as unknown as Json,
@@ -114,15 +110,37 @@ export async function submitSolicitud(
     return { ok: false, error: "No pudimos generar tu informe. Intentá de nuevo." };
   }
 
-  // 4. Avanzar status de la solicitud.
   await admin
     .from("solicitudes")
     .update({ status: "procesada" } as never)
     .eq("id", solicitud.id);
 
-  // 5. Email best-effort.
+  // 4. Generar magic link via Admin API (no manda email; lo mandamos
+  // nosotros con el contenido custom).
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
   const resultadoUrl = `${siteUrl}/wizard/resultado?id=${informe.id}`;
+
+  let magicLinkUrl: string | null = null;
+  try {
+    const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+      type: "magiclink",
+      email: w.correo,
+      options: {
+        redirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent(`/wizard/resultado?id=${informe.id}`)}`,
+      },
+    });
+    if (linkErr) {
+      console.error("submitSolicitud: generateLink falló", linkErr);
+    } else {
+      magicLinkUrl = linkData.properties?.action_link ?? null;
+    }
+  } catch (err) {
+    console.error("submitSolicitud: generateLink exception", err);
+  }
+
+  // 5. Email best-effort. Si falló generateLink, mandamos igual (sin botón
+  // de magic link, solo el resumen). El cliente puede ir a /login con su
+  // correo para recibir un nuevo link.
   try {
     await enviarEmailInforme({
       to: w.correo,
@@ -132,11 +150,12 @@ export async function submitSolicitud(
       liquidoEfectivo: resumen.liquidoEfectivo,
       tips,
       resultadoUrl,
+      magicLinkUrl,
     });
   } catch (err) {
     console.error("submitSolicitud: error enviando email (no fatal)", err);
   }
 
   revalidatePath("/wizard/resultado");
-  return { ok: true, informeId: informe.id };
+  return { ok: true, informeId: informe.id, correo: w.correo };
 }

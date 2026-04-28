@@ -10,6 +10,7 @@ import { StepShell } from "../StepShell";
 import { formatRut } from "@/lib/chilean-rut";
 import { wizardSchema, type WizardData } from "@/lib/wizard-schema";
 import { submitSolicitud } from "@/app/wizard/actions";
+import { clearWizardStorage } from "../use-wizard";
 import type { StepProps } from "../types";
 
 export function Step11Final({ wizard }: StepProps) {
@@ -40,7 +41,8 @@ export function Step11Final({ wizard }: StepProps) {
         setError(result.error);
         return;
       }
-      router.push(`/wizard/resultado?id=${result.informeId}`);
+      clearWizardStorage();
+      router.push(`/wizard/sent?correo=${encodeURIComponent(result.correo)}`);
     });
   };
 

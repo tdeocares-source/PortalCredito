@@ -44,8 +44,10 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
+  // /wizard es público (lead-gen sin fricción). El informe (resultado) requiere
+  // auth — el cliente entra con magic link enviado al final del wizard.
   const isProtected =
-    pathname.startsWith("/wizard") || pathname.startsWith("/informe");
+    pathname.startsWith("/wizard/resultado") || pathname.startsWith("/informe");
 
   if (isProtected && !user) {
     const url = request.nextUrl.clone();
