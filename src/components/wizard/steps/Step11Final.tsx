@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useTransition } from "react";
 import { useFormContext } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -7,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StepShell } from "../StepShell";
 import { formatRut } from "@/lib/chilean-rut";
-import type { WizardData } from "@/lib/wizard-schema";
+import { wizardSchema, type WizardData } from "@/lib/wizard-schema";
+import { submitSolicitud } from "@/app/wizard/actions";
 import type { StepProps } from "../types";
 
 export function Step11Final({ wizard }: StepProps) {
@@ -15,10 +17,31 @@ export function Step11Final({ wizard }: StepProps) {
   const { register, watch, formState } = useFormContext<WizardData>();
   const canal = watch("canalPreferido");
   const otroCanal: "correo" | "celular" = canal === "correo" ? "celular" : "correo";
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
 
-  const handleSubmit = async () => {
-    const ok = await wizard.next([otroCanal]);
-    if (ok) router.push("/wizard/resultado");
+  const handleSubmit = () => {
+    startTransition(async () => {
+      setError(null);
+      const ok = await wizard.next([otroCanal]);
+      if (!ok) return;
+
+      // Validación final defensiva — `wizard.next` ya disparó trigger del paso,
+      // pero la server action vuelve a validar el schema completo.
+      const values = wizard.form.getValues();
+      const parsed = wizardSchema.safeParse(values);
+      if (!parsed.success) {
+        setError("Faltan datos del wizard. Volvé a revisar los pasos.");
+        return;
+      }
+
+      const result = await submitSolicitud(parsed.data);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      router.push(`/wizard/resultado?id=${result.informeId}`);
+    });
   };
 
   return (
@@ -26,9 +49,19 @@ export function Step11Final({ wizard }: StepProps) {
       title="Último paso"
       subtitle="Confirma tu RUT y un dato adicional para que podamos contactarte."
       footer={
-        <Button size="lg" type="button" onClick={handleSubmit}>
-          Ver mi resumen
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          {error ? (
+            <span className="text-sm text-destructive">{error}</span>
+          ) : null}
+          <Button
+            size="lg"
+            type="button"
+            onClick={handleSubmit}
+            disabled={isPending}
+          >
+            {isPending ? "Generando tu resumen..." : "Ver mi resumen"}
+          </Button>
+        </div>
       }
     >
       <div className="flex flex-col gap-1.5">

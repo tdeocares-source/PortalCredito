@@ -11,9 +11,8 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "./database.types";
 
-let cached: ReturnType<typeof createClient<Database>> | null = null;
+let cached: ReturnType<typeof createClient> | null = null;
 
 export function getSupabaseAdmin() {
   if (cached) return cached;
@@ -27,7 +26,7 @@ export function getSupabaseAdmin() {
     );
   }
 
-  cached = createClient<Database>(url, serviceKey, {
+  cached = createClient(url, serviceKey, {
     auth: {
       // El cliente admin no maneja sesión de usuario.
       autoRefreshToken: false,

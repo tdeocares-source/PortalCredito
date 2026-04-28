@@ -43,6 +43,11 @@ export type PrioridadCompra =
 export type CanalContacto = "correo" | "celular";
 export type AccesoEvento = "open" | "download" | "print";
 
+// NOTA: este Database type se mantiene como referencia documental del schema
+// hasta que se configure `supabase gen types` y se reemplace con el output
+// auto-generado. Por incompatibilidades de inferencia con supabase-js v2.47+,
+// los clientes (browser/server/admin) NO se tipan con este Database por ahora;
+// las queries usan casts puntuales donde haga falta.
 export type Database = {
   public: {
     Tables: {
