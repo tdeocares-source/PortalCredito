@@ -1,13 +1,53 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { callCrediBid } from "@/lib/credibid";
 import { calcularResumen } from "@/lib/financial-calc";
 import { generarConsejos } from "@/lib/consejos";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { wizardSchema, type WizardData } from "@/lib/wizard-schema";
 import { enviarEmailInforme } from "@/lib/email-informe";
+import { logSafeError } from "@/lib/log";
 import type { Json } from "@/lib/database.types";
+
+// Rate limit: previene abuso del endpoint público.
+// - 5 submits por IP / hora: bots y spam masivo
+// - 3 magic links por correo / hora: phishing usando nuestro dominio FROM
+const RATE_LIMIT_IP_MAX = 5;
+const RATE_LIMIT_EMAIL_MAX = 3;
+const RATE_LIMIT_WINDOW_SECONDS = 3600;
+
+async function getClientIp(): Promise<string> {
+  const headersList = await headers();
+  // En Netlify/Vercel, x-forwarded-for tiene el IP del cliente al frente.
+  // En dev (sin proxy) no está → "local".
+  const xff = headersList.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0]?.trim() ?? "unknown";
+  return "local";
+}
+
+async function checkRateLimit(
+  admin: ReturnType<typeof getSupabaseAdmin>,
+  key: string,
+  max: number,
+): Promise<boolean> {
+  const { data, error } = (await admin.rpc(
+    "check_rate_limit" as never,
+    {
+      p_key: key,
+      p_max: max,
+      p_window_seconds: RATE_LIMIT_WINDOW_SECONDS,
+    } as never,
+  )) as { data: boolean | null; error: unknown };
+  if (error) {
+    // Fail-open: si la BD del rate limit falla, no bloqueamos al usuario
+    // legítimo. El log alerta del problema.
+    logSafeError("rate_limit: rpc fallo", error);
+    return true;
+  }
+  return data === true;
+}
 
 export type SubmitSolicitudResult =
   | { ok: true; informeId: string; correo: string }
@@ -33,6 +73,28 @@ export async function submitSolicitud(
   }
   const w = parsed.data;
   const admin = getSupabaseAdmin();
+
+  // Rate limit: por IP y por correo destinatario.
+  const ip = await getClientIp();
+  const ipOk = await checkRateLimit(admin, `submit:ip:${ip}`, RATE_LIMIT_IP_MAX);
+  if (!ipOk) {
+    return {
+      ok: false,
+      error: "Demasiadas solicitudes desde tu conexión. Intentá en una hora.",
+    };
+  }
+  const correoNorm = w.correo.toLowerCase().trim();
+  const emailOk = await checkRateLimit(
+    admin,
+    `submit:email:${correoNorm}`,
+    RATE_LIMIT_EMAIL_MAX,
+  );
+  if (!emailOk) {
+    return {
+      ok: false,
+      error: "Ya generamos varios informes para este correo. Esperá una hora.",
+    };
+  }
 
   // 1. Persistir solicitud huérfana.
   const solicitudInsert = {
@@ -62,7 +124,7 @@ export async function submitSolicitud(
     .single()) as { data: { id: string } | null; error: unknown };
 
   if (solErr || !solicitud) {
-    console.error("submitSolicitud: error insertando solicitud", solErr);
+    logSafeError("submitSolicitud: error insertando solicitud", solErr);
     return { ok: false, error: "No pudimos guardar tu solicitud. Intentá de nuevo." };
   }
 
@@ -106,7 +168,7 @@ export async function submitSolicitud(
     .single()) as { data: { id: string } | null; error: unknown };
 
   if (infErr || !informe) {
-    console.error("submitSolicitud: error insertando informe", infErr);
+    logSafeError("submitSolicitud: error insertando informe", infErr);
     return { ok: false, error: "No pudimos generar tu informe. Intentá de nuevo." };
   }
 
@@ -129,7 +191,7 @@ export async function submitSolicitud(
       email: w.correo,
     });
     if (linkErr) {
-      console.error("submitSolicitud: generateLink falló", linkErr);
+      logSafeError("submitSolicitud: generateLink falló", linkErr);
     } else {
       const hashedToken = linkData.properties?.hashed_token;
       if (hashedToken) {
@@ -138,7 +200,7 @@ export async function submitSolicitud(
       }
     }
   } catch (err) {
-    console.error("submitSolicitud: generateLink exception", err);
+    logSafeError("submitSolicitud: generateLink exception", err);
   }
 
   // 5. Email best-effort. Liviano: solo anuncia el informe + magic link.
@@ -150,7 +212,7 @@ export async function submitSolicitud(
       magicLinkUrl,
     });
   } catch (err) {
-    console.error("submitSolicitud: error enviando email (no fatal)", err);
+    logSafeError("submitSolicitud: error enviando email (no fatal)", err);
   }
 
   revalidatePath("/wizard/resultado");

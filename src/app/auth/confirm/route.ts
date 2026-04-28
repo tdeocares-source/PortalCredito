@@ -15,6 +15,7 @@ import { NextResponse } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { logSafeError } from "@/lib/log";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -49,7 +50,7 @@ export async function GET(request: Request) {
       .eq("correo_contacto", user.email)
       .is("user_id", null);
     if (claimErr) {
-      console.error("auth/confirm: error reclamando solicitudes", claimErr);
+      logSafeError("auth/confirm: error reclamando solicitudes", claimErr);
     }
   }
 
