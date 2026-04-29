@@ -31,6 +31,13 @@ export function PostHogProvider({ children }: { children: ReactNode }) {
       api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com",
       capture_pageview: false,
       person_profiles: "identified_only",
+      // Privacidad — combinado con "Discard client IPs" en el dashboard de
+      // PostHog (Project Settings → Privacy), evita correlacionar IP con el
+      // RUT/sueldo del usuario. ip:false dropea $ip de las properties; el
+      // servidor de PostHog también deja de loggearla cuando la setting del
+      // dashboard está activa.
+      ip: false,
+      respect_dnt: true,
       session_recording: {
         maskAllInputs: true,
       },
